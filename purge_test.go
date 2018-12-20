@@ -11,9 +11,8 @@ import (
 
 func TestPurgeSurrogateKey(t *testing.T) {
 	type mock struct {
-		url      string
-		response *http.Response
-		respErr  error
+		body []byte
+		err  error
 	}
 	type want struct {
 		purge *Purge
@@ -26,41 +25,60 @@ func TestPurgeSurrogateKey(t *testing.T) {
 		want
 	}{
 		{
-			name: "",
-			key: "",
+			name: "Valid Purge",
+			key:  "surrogate-key",
+			mock: mock{
+				body: []byte(`{"status":"ok","id":"test-id-1"}`),
+				err:  nil,
+			},
 			want: want{
 				purge: &Purge{
-
+					Status: "ok",
+					ID:     "test-id-1",
 				},
 				err: nil,
 			},
 		},
+		{
+			name: "Bad Purge Response",
+			key:  "surrogate-key",
+			mock: mock{
+				body: []byte(`{"status":"bad","id":"test-id-2"}`),
+				err:  nil,
+			},
+			want: want{
+				purge: &Purge{
+					Status: "bad",
+					ID:     "test-id-2",
+				},
+				err: errors.New("cdn purge received a non-ok status[bad]"),
+			},
+		},
 	}
-
-	apiKey := "test-api-key"
-	serviceID := "test-service-id"
 
 	for _, test := range tests {
 		t.Run(test.name, func(st *testing.T) {
+			recorder := httptest.NewRecorder()
+			recorder.Write(test.body)
+
 			client := &Client{
-				apiKey:    apiKey,
-				serviceID: serviceID,
+				apiKey:    "test-api-key",
+				serviceID: "test-service-id",
 				httpClient: TestClient{
-					test: st,
+					test:          st,
 					expectMethod:  http.MethodPost,
-					expectURL:     test.url,
+					expectURL:     "https://api.fastly.com/service/test-service-id/purge/" + test.key,
 					expectBody:    nil,
-					expectHeaders: map[string]string{
-						fastlyKeyHeader:apiKey,
-					},
-					response: test.response,
-					err:      test.respErr,
+					expectHeaders: map[string]string{fastlyKeyHeader: "test-api-key"},
+					response:      recorder.Result(),
+					err:           test.mock.err,
 				},
 			}
+
 			purge, err := client.PurgeSurrogateKey(test.key)
 
 			assert.Equal(st, test.purge, purge)
-			assert.Equal(st, test.err, err)
+			assert.Equal(st, test.want.err, err)
 		})
 	}
 }
